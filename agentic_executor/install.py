@@ -16,7 +16,7 @@ QUICK START (after pip install):
     exec-install --list                 # Show status
 
 SUPPORTED AGENTS:
-    claude-code     ~/.claude/skills/exec/skill.md
+    claude-code     ~/.claude/commands/exec.md
     cursor          ~/.cursor/rules/exec.mdc           (alwaysApply: false)
     windsurf        ~/.windsurf/memories/exec.md
     kiro            ~/.kiro/skills/exec/skill.md       (inclusion: always)
@@ -55,7 +55,7 @@ _SKILL_FILES = {
 _AGENTS = {
     "claude-code": {
         "skill": "default",
-        "path": Path.home() / ".claude" / "skills" / "exec" / "skill.md",
+        "path": Path.home() / ".claude" / "commands" / "exec.md",
         "label": "Claude Code",
         "activate": "Type /exec in Claude Code",
     },

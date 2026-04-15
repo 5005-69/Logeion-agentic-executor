@@ -50,6 +50,9 @@ all = [
     "agentic-executor[languages]",
 ]
 
+# Development / testing
+dev = ["pytest>=8.0"]
+
 [project.scripts]
 # Run thoughts from the CLI
 agentic-executor = "agentic_executor.cli:main"
