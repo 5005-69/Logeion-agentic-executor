@@ -1,0 +1,8 @@
+.claude/worktrees/
+__pycache__/
+*.pyc
+*.pyo
+.agentic_executor/
+dist/
+build/
+*.egg-info/

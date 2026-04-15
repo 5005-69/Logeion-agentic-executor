@@ -1,0 +1,394 @@
+---
+inclusion: always
+---
+
+## What you have access to
+
+A local Python interpreter. `execute()` is always in scope. The full standard library is available
+(`os`, `re`, `json`, `pathlib`, `collections`, etc.). Write one script, run it once.
+
+```bash
+python -m agentic_executor.cli --thought-stdin <<'EOF'
+# everything here runs locally — execute() is always available
+result = execute('read', {'path': 'config.py'})
+print(result['data']['content'])
+EOF
+```
+
+Every `execute()` returns the same envelope:
+
+```python
+{"success": bool, "data": Any, "error": str|None, "command": str, "args": dict}
+```
+
+Always check `result['success']` before accessing `result['data']`.
+
+---
+
+## When to use exec vs native tools
+
+| Situation | Use |
+|-----------|-----|
+| Read one file | Native `Read` |
+| Edit one location | Native `Edit` |
+| Git commands | Native `Bash` |
+| Read 2+ files | `/exec` |
+| Edit multiple lines / files | `/exec` |
+| Any loop over files | `/exec` |
+| Find files then modify them | `/exec` |
+| Run a CLI tool + process output | `/exec` |
+| Codebase scanning / analysis | `/exec` |
+
+**The right rhythm for multi-file edits:**
+
+The executor is for acting, not for reasoning. When you need to understand code before deciding what to change, use native reads first — then apply everything at once with exec.
+
+```
+# Wrong: reasoning and acting interleaved
+Read → Edit → Read → Edit → Read → Edit
+
+# Right: read until you understand, then act once
+Native Read → Native Read → Native Read → Exec (all edits in one thought)
+```
+
+Native `Read` brings content into your context so you can reason about it.
+Once you know what needs to change, exec applies all edits in a single call — no round-trips.
+
+---
+
+## Commands
+
+### Filesystem
+
+```python
+execute('read',    {'path': 'file.txt'})
+execute('read',    {'path': 'file.txt', 'lines': 20})              # first N lines
+execute('read',    {'path': 'file.txt', 'start': 10, 'end': 30})   # line range
+
+execute('write',   {'path': 'out.txt', 'content': 'hello'})
+execute('write',   {'path': 'log.txt', 'content': 'x\n', 'mode': 'a'})  # append
+
+# replace — two modes
+execute('replace', {'path': 'f.py', 'line': 42, 'new': '    return True'})           # line mode — precise, preserves indent
+execute('replace', {'path': 'f.py', 'old': 'foo()', 'new': 'bar()'})                 # text mode — first occurrence
+execute('replace', {'path': 'f.py', 'old': 'DEBUG', 'new': 'INFO', 'count': -1})     # text mode — all occurrences
+
+execute('copy',    {'src': 'a.txt', 'dst': 'b.txt'})
+execute('move',    {'src': 'old.txt', 'dst': 'new.txt'})
+execute('delete',  {'path': 'file.txt'})
+execute('delete',  {'path': 'dir/', 'recursive': True})             # irreversible — confirm first
+execute('mkdir',   {'path': 'new/dir', 'parents': True})
+execute('ls',      {'path': '.'})                                   # → {"files": [...], "dirs": [...]}
+```
+
+### Search
+
+```python
+execute('search', {'pattern': '*.py', 'path': '.', 'recursive': True,
+                   'exclude_dirs': ['venv', 'node_modules', '__pycache__']})
+# → {"files": ["src/a.py", ...]}
+
+execute('grep', {'pattern': 'TODO:', 'file_pattern': '*.py', 'path': '.',
+                 'recursive': True, 'ignore_case': False})
+# → {"matches": [{"file": str, "line": int, "text": str}, ...]}
+
+execute('info', {'path': 'file.txt'})
+# → {"exists": bool, "type": "file"|"dir", "size": int, "modified": float}
+```
+
+### Process
+
+```python
+execute('run', {'cmd': 'pytest tests/', 'timeout': 60})
+# → {"stdout": str, "stderr": str, "returncode": int}
+```
+
+### Codebase intelligence
+
+```python
+# Scan once per session — writes .agentic_executor/metadata.json
+execute('scan_codebase', {'path': '.'})
+
+execute('get_metadata', {'type': 'summary'})
+# → {"summary": {"total_files": int, "total_functions": int, "total_classes": int, ...},
+#    "is_stale": bool, "age_minutes": float}
+
+execute('get_metadata', {'type': 'structure'})
+# → {"files": {"path.py": {"functions": [{"name", "signature", "line", "docstring"}],
+#                           "classes": [str], "imports": [str], "lines": int}}}
+
+execute('get_metadata', {'type': 'imports'})
+# → {"imports": {"path.py": {"imports": [...], "imported_by": [...]}}}
+
+execute('get_metadata', {'type': 'all', 'filter': {'file': 'src/main.py'}})
+# → single-file detail
+```
+
+---
+
+## Patterns
+
+### Read multiple files in one call
+
+```python
+python -m agentic_executor.cli --thought-stdin <<'EOF'
+for path in ['config.py', 'settings.py', 'constants.py']:
+    r = execute('read', {'path': path})
+    if r['success']:
+        print(f"=== {path} ===")
+        print(r['data']['content'])
+EOF
+```
+
+### Batch edits across multiple files
+
+```python
+python -m agentic_executor.cli --thought-stdin <<'EOF'
+# Multiple targeted line replacements across files — all in one thought
+edits = [
+    ('src/app.py',      15, '    DEBUG = False'),
+    ('src/worker.py',   8,  '    LOG_LEVEL = "INFO"'),
+    ('config/prod.py',  3,  'ENV = "production"'),
+]
+for path, line, new in edits:
+    r = execute('replace', {'path': path, 'line': line, 'new': new})
+    print(f"{'ok' if r['success'] else 'FAIL'}  {path}:{line}")
+EOF
+```
+
+### Find then modify
+
+```python
+python -m agentic_executor.cli --thought-stdin <<'EOF'
+# Find all files with a deprecated import, replace in each
+matches = execute('grep', {'pattern': 'from utils import helper',
+                           'file_pattern': '*.py', 'recursive': True})
+for m in matches['data']['matches']:
+    execute('replace', {'path': m['file'],
+                        'old': 'from utils import helper',
+                        'new': 'from core.utils import helper',
+                        'count': 1})
+    print(f"updated  {m['file']}")
+EOF
+```
+
+### Codebase analysis
+
+```python
+python -m agentic_executor.cli --thought-stdin <<'EOF'
+execute('scan_codebase', {'path': '.'})
+meta = execute('get_metadata', {'type': 'structure'})
+
+by_size = sorted(
+    ((p, len(d['functions'])) for p, d in meta['data']['files'].items()),
+    key=lambda x: x[1], reverse=True
+)
+for path, count in by_size[:10]:
+    print(f"{count:3}  {path}")
+EOF
+```
+
+### Run CLI tool and process output
+
+```python
+python -m agentic_executor.cli --thought-stdin <<'EOF'
+result = execute('run', {'cmd': 'git log --oneline -20'})
+if result['success']:
+    for line in result['data']['stdout'].strip().split('\n'):
+        print(line)
+EOF
+```
+
+### Cache-aware scan
+
+```python
+python -m agentic_executor.cli --thought-stdin <<'EOF'
+info = execute('info', {'path': '.agentic_executor/metadata.json'})
+if not info['data']['exists']:
+    execute('scan_codebase', {'path': '.'})
+else:
+    meta = execute('get_metadata', {'type': 'summary'})
+    if meta['data'].get('is_stale'):
+        execute('scan_codebase', {'path': '.'})
+
+s = execute('get_metadata', {'type': 'summary'})['data']['summary']
+print(f"Files: {s['total_files']}  Functions: {s['total_functions']}  Classes: {s['total_classes']}")
+EOF
+```
+
+---
+
+## Return shapes
+
+All results live under `result['data']`. These are the shapes for the commands whose output you'll actually navigate:
+
+```python
+# search
+result['data']['files']                        # list[str] — matched paths
+
+# grep
+result['data']['matches']                      # list of:
+#   {"file": str, "line": int, "text": str}
+
+# ls
+result['data']['files']                        # list[str]
+result['data']['dirs']                         # list[str]
+
+# info
+result['data']['exists']                       # bool
+result['data']['type']                         # "file" | "dir"
+result['data']['size']                         # int (bytes)
+result['data']['modified']                     # float (unix timestamp)
+
+# get_metadata — type='summary'
+result['data']['summary']['total_files']       # int
+result['data']['summary']['total_functions']   # int
+result['data']['summary']['total_classes']     # int
+result['data']['is_stale']                     # bool — top-level, NOT inside summary
+result['data']['age_minutes']                  # float
+
+# get_metadata — type='structure'
+result['data']['files']                        # dict[path, file_data]
+result['data']['files'][path]['functions']     # list of:
+#   {"name": str, "line": int, "signature": str, "docstring": str}
+result['data']['files'][path]['classes']       # list[str]
+result['data']['files'][path]['imports']       # list[str]
+result['data']['files'][path]['lines']         # int
+
+# get_metadata — type='imports'
+result['data']['imports']                      # dict[path, import_data]
+result['data']['imports'][path]['imports']     # list[str] — what this file imports
+result['data']['imports'][path]['imported_by'] # list[str] — who imports this file
+
+# run
+result['data']['stdout']                       # str
+result['data']['stderr']                       # str
+result['data']['returncode']                   # int
+
+# read
+result['data']['content']                      # str — full content (no 'lines' arg)
+result['data']['lines']                        # list[str] — when 'lines' or 'start'/'end' used
+```
+
+---
+
+## Real workflow: debug a broken project in 3 calls
+
+> User: "this project doesn't run, can you fix it?"
+
+**Call 1 — scan once, get the full picture:**
+
+```bash
+python -m agentic_executor.cli --thought-stdin <<'EOF'
+execute('scan_codebase', {'path': 'example/phi_calculator'})
+meta = execute('get_metadata', {'type': 'structure'})
+
+for path, data in meta['data']['files'].items():
+    print(f"\n--- {path} ---")
+    print(f"  functions : {[f['name'] + ':' + str(f['line']) for f in data.get('functions', [])]}")
+    print(f"  imports   : {data.get('imports', [])}")
+EOF
+```
+
+```
+--- calculator.py ---
+  functions : ['compute_phi:9', 'phi_power:19', ...]
+  imports   : ['math']
+
+--- formatter.py ---
+  functions : ['format_result:13', 'format_powers:20', ...]
+  imports   : ['os', 'phi_calculator.compute', 'phi_calculator.compute']  ← non-existent module, twice
+
+--- main.py ---
+  functions : ['run:9']
+  imports   : ['phi_calculator.computer', ...]  ← non-existent module
+
+--- validator.py ---
+  functions : ['is_valid_precision:7', ...]
+  imports   : []
+```
+
+From this output alone: two files import modules that don't exist, `compute_phi` starts at line 9, `is_valid_precision` at line 7.
+
+**Call 2 — read all 4 files in one loop:**
+
+```bash
+python -m agentic_executor.cli --thought-stdin <<'EOF'
+for f in ['main.py', 'calculator.py', 'formatter.py', 'validator.py']:
+    r = execute('read', {'path': f'example/phi_calculator/{f}'})
+    if r['success']:
+        for i, line in enumerate(r['data']['content'].split('\n'), 1):
+            print(f"{i:3}  {line}")
+EOF
+```
+
+Reveals exact line numbers for every bug: wrong formula in lines 9–16, bad imports in lines 4–7, wrong bounds in lines 7–15.
+
+**Call 3 — fix everything across all files in one thought:**
+
+```bash
+python -m agentic_executor.cli --thought-stdin <<'EOF'
+edits = [
+    {'path': 'example/phi_calculator/main.py',       'line': 4,  'new': 'from phi_calculator.calculator import compute_phi'},
+    {'path': 'example/phi_calculator/calculator.py',  'line': 9,  'new': 'def compute_phi(precision: int) -> float:'},
+    {'path': 'example/phi_calculator/calculator.py',  'line': 10, 'new': '    """Return phi = (1 + sqrt(5)) / 2 rounded to precision decimal places."""'},
+    {'path': 'example/phi_calculator/calculator.py',  'line': 11, 'new': '    phi = (1 + math.sqrt(5)) / 2'},
+    {'path': 'example/phi_calculator/calculator.py',  'line': 12, 'new': '    return round(phi, precision)'},
+    {'path': 'example/phi_calculator/formatter.py',   'line': 6,  'new': 'from phi_calculator.calculator import phi_power'},
+    {'path': 'example/phi_calculator/formatter.py',   'line': 7,  'new': 'from phi_calculator.calculator import convergence_table'},
+    {'path': 'example/phi_calculator/validator.py',   'line': 7,  'new': 'def is_valid_precision(precision) -> bool:'},
+    {'path': 'example/phi_calculator/validator.py',   'line': 9,  'new': '    if not isinstance(precision, int):'},
+    {'path': 'example/phi_calculator/validator.py',   'line': 11, 'new': '    return 1 <= precision <= 50'},
+]
+for e in edits:
+    r = execute('replace', {'path': e['path'], 'line': e['line'], 'new': e['new']})
+    print(f"{'ok' if r['success'] else 'FAIL'}  {e['path']}:{e['line']}")
+EOF
+```
+
+```
+ok  example/phi_calculator/main.py:4
+ok  example/phi_calculator/calculator.py:9
+ok  example/phi_calculator/calculator.py:10
+ok  example/phi_calculator/calculator.py:11
+ok  example/phi_calculator/calculator.py:12
+ok  example/phi_calculator/formatter.py:6
+ok  example/phi_calculator/formatter.py:7
+ok  example/phi_calculator/validator.py:7
+ok  example/phi_calculator/validator.py:9
+ok  example/phi_calculator/validator.py:11
+
+Done: 10 edits applied, 0 failed
+```
+
+10 targeted edits across 4 files. Zero round-trips. Full walkthrough with all 22 edits: [example/WALKTHROUGH.md](../../../example/WALKTHROUGH.md).
+
+---
+
+## Gotchas
+
+- **Always `--thought-stdin <<'EOF'`** for multi-line scripts — `--thought "..."` breaks on quotes and newlines.
+- **Check `result['success']` first** — `result['data']` is `None` on failure; accessing it directly will crash.
+- **`recursive: True` is not the default** for `search` and `grep` — always pass it explicitly.
+- **`count: -1` replaces all occurrences** — omit `count` or use `count: 1` for a single targeted replacement.
+- **`delete` with `recursive: True` is irreversible** — confirm with the user before running on directories.
+- **Do not scan before every operation** — `get_metadata` reads from cache instantly; scan once per session.
+- **Rescan after structural changes** — adding/renaming/deleting files makes the cache stale.
+- **Cache is written relative to CWD, not to `path`** — if you scan a subfolder, pass `cache` explicitly or the cache lands in the wrong place:
+  ```python
+  # scanning a subfolder — cache goes to root by default (wrong)
+  execute('scan_codebase', {'path': 'example/phi_calculator'})
+
+  # correct — keep cache next to what was scanned
+  execute('scan_codebase', {
+      'path': 'example/phi_calculator',
+      'cache': 'example/phi_calculator/.agentic_executor/metadata.json'
+  })
+  # then query it:
+  execute('get_metadata', {
+      'type': 'summary',
+      'cache': 'example/phi_calculator/.agentic_executor/metadata.json'
+  })
+  ```
+- **Use raw strings when writing code files** — `r'''...'''` avoids double-escaping `\n`, `\t`, etc.
+- **Add `.agentic_executor/` to `.gitignore`** — it is local machine state, not source code.

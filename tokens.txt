@@ -1,0 +1,9 @@
+skill.md -> 4487
+
+
+commands.py -> 15587
+executor.py -> 1226
+cli.py -> 3171
+install -> 3657
+
+code total of 23641 tokens
