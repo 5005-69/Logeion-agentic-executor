@@ -71,7 +71,8 @@ Once you know what needs to change, exec applies all edits in a single call — 
 ### Filesystem
 
 ```python
-execute('read',    {'path': 'file.txt'})
+execute('read',    {'path': 'file.txt'})                           # whole file (up to 200 lines)
+execute('read',    {'path': 'file.txt', 'full': True})             # whole file, no limit
 execute('read',    {'path': 'file.txt', 'lines': 20})              # first N lines
 execute('read',    {'path': 'file.txt', 'start': 10, 'end': 30})   # line range
 
@@ -146,7 +147,16 @@ for path in ['config.py', 'settings.py', 'constants.py']:
     r = execute('read', {'path': path})
     if r['success']:
         print(f"=== {path} ===")
-        print(r['data']['content'])
+        print(r['data']['content'])       # always 'content', never 'lines'
+        if r['data'].get('truncated'):
+            # file was cut — fetch the rest
+            rest = execute('read', {'path': path,
+                                    'start': r['data']['next_start'],
+                                    'end':   r['data']['total_lines']})
+            if rest['success']:
+                print('\n'.join(rest['data']['lines']))
+            # or skip the loop and use full=True when you know you need everything:
+            # r = execute('read', {'path': path, 'full': True})
 EOF
 ```
 
@@ -275,9 +285,15 @@ result['data']['stdout']                       # str
 result['data']['stderr']                       # str
 result['data']['returncode']                   # int
 
-# read
-result['data']['content']                      # str — full content (no 'lines' arg)
-result['data']['lines']                        # list[str] — when 'lines' or 'start'/'end' used
+# read — whole file (no 'lines'/'start'/'end' arg)
+result['data']['content']                      # str — always a string, truncated or not
+result['data']['truncated']                    # bool — True when file exceeded the limit
+result['data']['total_lines']                  # int — total line count (only when truncated)
+result['data']['next_start']                   # int — first unread line, 1-indexed (only when truncated)
+result['data']['truncation_notice']            # str — human-readable hint (only when truncated)
+
+# read — range read ('lines' or 'start'+'end' arg)
+result['data']['lines']                        # list[str]
 ```
 
 ---
@@ -378,6 +394,8 @@ Done: 10 edits applied, 0 failed
 ## Gotchas
 
 - **Always `--thought-stdin <<'EOF'`** for multi-line scripts — `--thought "..."` breaks on quotes and newlines.
+- **`read` always returns `content` (str)** for whole-file reads — use `result['data']['content']` regardless of file size. Check `result['data'].get('truncated')` to detect partial reads.
+- **Large files are truncated at 200 lines by default** — a WARNING is printed to stderr and `next_start`/`total_lines` are included in the result so you can loop for the rest. Use `full: True` to skip the limit entirely.
 - **Check `result['success']` first** — `result['data']` is `None` on failure; accessing it directly will crash.
 - **`recursive: True` is not the default** for `search` and `grep` — always pass it explicitly.
 - **`count: -1` replaces all occurrences** — omit `count` or use `count: 1` for a single targeted replacement.

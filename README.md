@@ -4,7 +4,7 @@
 
 ### The execution layer for AI agents that need real hands
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg?style=flat-square)](https://github.com/Logeion/agentic-executor)
+[![Version](https://img.shields.io/badge/version-1.0.2-blue.svg?style=flat-square)](https://github.com/Logeion/agentic-executor)
 [![Python](https://img.shields.io/badge/python-3.10+-yellow.svg?style=flat-square)]()
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg?style=flat-square)]()
 [![No deps](https://img.shields.io/badge/dependencies-zero-brightgreen.svg?style=flat-square)]()
@@ -99,8 +99,7 @@ Always check `result['success']` before reading `result['data']`.
 
 ```python
 execute('read',    {'path': 'file.txt'})                                   # first 200 lines (default)
-execute('read',    {'path': 'file.txt', 'limit': 0})                      # full file, no limit
-execute('read',    {'path': 'file.txt', 'limit': 500})                    # custom limit
+execute('read',    {'path': 'file.txt', 'full': True})                    # full file, no limit
 execute('read',    {'path': 'file.txt', 'lines': 20})                     # first N lines
 execute('read',    {'path': 'file.txt', 'start': 10, 'end': 30})          # range
 execute('write',   {'path': 'out.txt', 'content': 'hello'})
@@ -303,19 +302,24 @@ def f():
 execute('write', {'path': 'f.py', 'content': content})
 ```
 
-**Reading large files — use the truncation notice:**
+**Reading large files:**
+
+`read` always returns `result['data']['content']` (str) — even when the file
+is truncated. Check `truncated` and use `next_start` to continue:
 
 ```python
-result = execute('read', {'path': 'big.py'})   # returns max 200 lines by default
+result = execute('read', {'path': 'big.py'})    # up to 200 lines, always 'content'
 data = result['data']
 
 if data.get('truncated'):
-    print(data['truncation_notice'])
-    # → [...output truncated at 200 lines — 1225 more lines not shown.
-    #    Use execute('read', {'path': 'big.py', 'start': 201, 'end': 1425}) to continue.]
+    # fetch the rest — next_start points to the first unread line
+    rest = execute('read', {'path': 'big.py',
+                            'start': data['next_start'],
+                            'end':   data['total_lines']})
+    full = data['content'] + '\n'.join(rest['data']['lines'])
 
-# Read all at once when needed:
-result = execute('read', {'path': 'big.py', 'limit': 0})
+# Or skip the loop entirely:
+result = execute('read', {'path': 'big.py', 'full': True})
 ```
 
 **Scan before querying metadata:**

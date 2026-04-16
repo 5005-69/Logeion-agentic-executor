@@ -15,6 +15,7 @@ VERSION: v0.1.0 (Initial Implementation)
 """
 
 import os
+import sys
 import shutil
 import subprocess
 import json
@@ -80,21 +81,34 @@ def read_file(args: Dict[str, Any]) -> Dict[str, Any]:
         start: Optional — start line (1-indexed)
         end:   Optional — end line (1-indexed)
         limit: Max lines when reading whole file (default 200). Use 0 for no limit.
+        full:  If True, read entire file ignoring limit (equivalent to limit=0).
 
     Returns:
-        {"content": str} OR {"lines": list, "truncated": bool, "truncation_notice": str}
+        Whole-file read (no lines/start/end):
+            {"content": str}                         — file fits within limit
+            {"content": str, "truncated": True,      — file exceeds limit
+             "truncation_notice": str,
+             "total_lines": int, "next_start": int}
+
+        Range read (lines or start/end):
+            {"lines": list[str]}
     """
     path = args.get("path")
     lines = args.get("lines")
     start = args.get("start")
     end = args.get("end")
     limit = args.get("limit", _READ_DEFAULT_LIMIT)
+    full = args.get("full", False)
+
+    # 'full: True' disables truncation (same as limit=0)
+    if full:
+        limit = 0
 
     if not path:
         return {"error": "Missing 'path' argument"}
 
     if not os.path.exists(path):
-        return {"error": f"File not found: {path}"}
+        return {"error": f"File not found: {path} (CWD: {os.getcwd()})"}
 
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -123,17 +137,25 @@ def read_file(args: Dict[str, Any]) -> Dict[str, Any]:
                 total = len(all_lines)
 
                 if limit and total > limit:
-                    result_lines = [line.rstrip("\n") for line in all_lines[:limit]]
+                    next_start = limit + 1
                     notice = (
-                        f"[...output truncated at {limit} lines — "
+                        f"[TRUNCATED at {limit}/{total} lines — "
                         f"{total - limit} more lines not shown. "
-                        f"Use execute('read', {{'path': '{path}', 'start': {limit + 1}, 'end': {total}}}) to continue.]"
+                        f"Continue: execute('read', {{'path': '{path}', 'start': {next_start}, 'end': {total}}}) "
+                        f"or read all at once: execute('read', {{'path': '{path}', 'full': True}})]"
+                    )
+                    print(
+                        f"\nWARNING: '{path}' truncated at {limit}/{total} lines "
+                        f"(next_start={next_start}). "
+                        f"Use full=True or start/end to read more.\n",
+                        file=sys.stderr,
                     )
                     return {
-                        "lines": result_lines,
+                        "content": "".join(all_lines[:limit]),
                         "truncated": True,
                         "truncation_notice": notice,
                         "total_lines": total,
+                        "next_start": next_start,
                     }
 
                 return {"content": "".join(all_lines)}
@@ -205,7 +227,7 @@ def copy_file(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "Missing 'src' or 'dst' argument"}
 
     if not os.path.exists(src):
-        return {"error": f"Source not found: {src}"}
+        return {"error": f"Source not found: {src} (CWD: {os.getcwd()})"}
 
     try:
         if os.path.isdir(src):
@@ -236,7 +258,7 @@ def move_file(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "Missing 'src' or 'dst' argument"}
 
     if not os.path.exists(src):
-        return {"error": f"Source not found: {src}"}
+        return {"error": f"Source not found: {src} (CWD: {os.getcwd()})"}
 
     try:
         shutil.move(src, dst)
@@ -264,7 +286,7 @@ def delete_file(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "Missing 'path' argument"}
 
     if not os.path.exists(path):
-        return {"error": f"Path not found: {path}"}
+        return {"error": f"Path not found: {path} (CWD: {os.getcwd()})"}
 
     try:
         if os.path.isdir(path):
@@ -323,7 +345,7 @@ def list_directory(args: Dict[str, Any]) -> Dict[str, Any]:
     pattern = args.get("pattern")
 
     if not os.path.exists(path):
-        return {"error": f"Directory not found: {path}"}
+        return {"error": f"Directory not found: {path} (CWD: {os.getcwd()})"}
 
     try:
         if pattern:
@@ -378,7 +400,7 @@ def replace_in_file(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "Missing required arguments: 'path' and 'new'"}
 
     if not os.path.exists(path):
-        return {"error": f"File not found: {path}"}
+        return {"error": f"File not found: {path} (CWD: {os.getcwd()})"}
 
     try:
         # MODE 1: Line-based editing
@@ -497,7 +519,7 @@ def search_files(args: Dict[str, Any]) -> Dict[str, Any]:
     recursive = args.get("recursive", True)
 
     if not os.path.exists(path):
-        return {"error": f"Directory not found: {path}"}
+        return {"error": f"Directory not found: {path} (CWD: {os.getcwd()})"}
 
     try:
         from glob import glob
@@ -591,7 +613,7 @@ def grep_files(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "Missing 'pattern' argument"}
 
     if not os.path.exists(path):
-        return {"error": f"Directory not found: {path}"}
+        return {"error": f"Directory not found: {path} (CWD: {os.getcwd()})"}
 
     try:
         import re
@@ -1142,7 +1164,7 @@ def scan_codebase(args: Dict[str, Any]) -> Dict[str, Any]:
     ignore_file = args.get("ignore_file", ".agentic_executor/.agentic_ignore")
 
     if not os.path.exists(root_path):
-        return {"error": f"Directory not found: {root_path}"}
+        return {"error": f"Directory not found: {root_path} (CWD: {os.getcwd()})"}
 
     try:
         ignore_patterns = _load_ignore_patterns(ignore_file)
@@ -1327,7 +1349,7 @@ def get_metadata(args: Dict[str, Any]) -> Dict[str, Any]:
     filter_spec = args.get("filter", {})
 
     if not os.path.exists(cache_path):
-        return {"error": f"Cache not found: {cache_path}. Run 'scan_codebase' first."}
+        return {"error": f"Cache not found: {cache_path} (CWD: {os.getcwd()}). Run 'scan_codebase' first."}
 
     try:
         with open(cache_path, "r", encoding="utf-8") as f:

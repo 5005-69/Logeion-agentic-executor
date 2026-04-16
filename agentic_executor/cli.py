@@ -276,26 +276,7 @@ EXAMPLES
         if hasattr(sys.stdin, 'reconfigure'):
             sys.stdin.reconfigure(encoding='utf-8', errors='replace')
 
-        raw_input = sys.stdin.read()
-
-        import re
-        lines = raw_input.split('\n')
-        fixed_lines = []
-
-        for line in lines:
-            stripped = line.strip()
-            if not stripped or stripped.startswith('#'):
-                fixed_lines.append(line)
-                continue
-
-            if stripped.endswith(':")') or stripped.endswith("':"):
-                if fixed_lines and 'print("' in fixed_lines[-1]:
-                    fixed_lines[-1] = fixed_lines[-1].rstrip() + '\\n' + stripped
-                    continue
-
-            fixed_lines.append(line)
-
-        args.thought = '\n'.join(fixed_lines)
+        args.thought = sys.stdin.read()
 
     if args.help_commands:
         show_available_commands()
