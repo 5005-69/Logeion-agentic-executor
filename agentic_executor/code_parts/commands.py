@@ -227,7 +227,7 @@ def copy_file(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "Missing 'src' or 'dst' argument"}
 
     if not os.path.exists(src):
-        return {"error": f"Source not found: {src}"}
+        return {"error": f"Source not found: {src} (CWD: {os.getcwd()})"}
 
     try:
         if os.path.isdir(src):
@@ -258,7 +258,7 @@ def move_file(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "Missing 'src' or 'dst' argument"}
 
     if not os.path.exists(src):
-        return {"error": f"Source not found: {src}"}
+        return {"error": f"Source not found: {src} (CWD: {os.getcwd()})"}
 
     try:
         shutil.move(src, dst)
@@ -286,7 +286,7 @@ def delete_file(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "Missing 'path' argument"}
 
     if not os.path.exists(path):
-        return {"error": f"Path not found: {path}"}
+        return {"error": f"Path not found: {path} (CWD: {os.getcwd()})"}
 
     try:
         if os.path.isdir(path):
@@ -345,7 +345,7 @@ def list_directory(args: Dict[str, Any]) -> Dict[str, Any]:
     pattern = args.get("pattern")
 
     if not os.path.exists(path):
-        return {"error": f"Directory not found: {path}"}
+        return {"error": f"Directory not found: {path} (CWD: {os.getcwd()})"}
 
     try:
         if pattern:
@@ -400,7 +400,7 @@ def replace_in_file(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "Missing required arguments: 'path' and 'new'"}
 
     if not os.path.exists(path):
-        return {"error": f"File not found: {path}"}
+        return {"error": f"File not found: {path} (CWD: {os.getcwd()})"}
 
     try:
         # MODE 1: Line-based editing
@@ -519,7 +519,7 @@ def search_files(args: Dict[str, Any]) -> Dict[str, Any]:
     recursive = args.get("recursive", True)
 
     if not os.path.exists(path):
-        return {"error": f"Directory not found: {path}"}
+        return {"error": f"Directory not found: {path} (CWD: {os.getcwd()})"}
 
     try:
         from glob import glob
@@ -613,7 +613,7 @@ def grep_files(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "Missing 'pattern' argument"}
 
     if not os.path.exists(path):
-        return {"error": f"Directory not found: {path}"}
+        return {"error": f"Directory not found: {path} (CWD: {os.getcwd()})"}
 
     try:
         import re
@@ -1164,7 +1164,7 @@ def scan_codebase(args: Dict[str, Any]) -> Dict[str, Any]:
     ignore_file = args.get("ignore_file", ".agentic_executor/.agentic_ignore")
 
     if not os.path.exists(root_path):
-        return {"error": f"Directory not found: {root_path}"}
+        return {"error": f"Directory not found: {root_path} (CWD: {os.getcwd()})"}
 
     try:
         ignore_patterns = _load_ignore_patterns(ignore_file)
@@ -1349,7 +1349,7 @@ def get_metadata(args: Dict[str, Any]) -> Dict[str, Any]:
     filter_spec = args.get("filter", {})
 
     if not os.path.exists(cache_path):
-        return {"error": f"Cache not found: {cache_path}. Run 'scan_codebase' first."}
+        return {"error": f"Cache not found: {cache_path} (CWD: {os.getcwd()}). Run 'scan_codebase' first."}
 
     try:
         with open(cache_path, "r", encoding="utf-8") as f:
